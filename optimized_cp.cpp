@@ -12,6 +12,7 @@
 #include <mutex>
 #include <semaphore.h>
 #include <fstream>
+#include <cstdlib>
 char* SOURCE_DIR = nullptr;
 char* DESTINATION_DIR = nullptr;
 std::mutex threads_mutex;
@@ -99,6 +100,15 @@ void sync_copy(off_t file_size, int src_fd, int dest_fd) {
         std::cerr << "Failed to memory-map source file (FD: " << src_fd << ", size: " << file_size << "): " << strerror(errno) << std::endl;
         return;
     }
+    std::cout << "SRC MMAP FINE" << std::endl;
+
+    // Set the destination file size to match the source file size
+    if (ftruncate(dest_fd, file_size) == -1) {
+        perror("Error setting file size");
+        close(src_fd);
+        close(dest_fd);
+        return;
+    }
 
     // Memory-map the destination file
     void* dest_map = mmap(NULL, file_size, PROT_WRITE, MAP_SHARED, dest_fd, 0);
@@ -107,23 +117,40 @@ void sync_copy(off_t file_size, int src_fd, int dest_fd) {
         munmap(src_map, file_size);
         return;
     }
+    std::cout << "DST MMAP FINE" << std::endl;
 
     // Copy data between the memory-mapped files
-    memcpy(dest_map, src_map, file_size);
+
+    // Allocate a temporary buffer that is aligned to the system's alignment requirements
+    const size_t alignment = 64;  // set to the alignment required by your system
+    char* temp_buffer = static_cast<char*>(aligned_alloc(alignment, file_size));
+
+    // Copy the data from src to dst using the temporary buffer
+    std::memcpy(temp_buffer, src_map, file_size);
+    std::cout << "FIRST MEM COPY" << std::endl;
+    std::memcpy(dest_map, temp_buffer, file_size);
+    std::cout << "SECOND MEM COPY" << std::endl;
+
+    // Free the temporary buffer
+    std::free(temp_buffer);
+    std::cout << "COPY MMAP FINE" << std::endl;
 
     // Clean up resources
     munmap(src_map, file_size);
     munmap(dest_map, file_size);
 }
+
 void copy_file(const char* src_path, const char* dest_path) {
     // Open the source file for reading
+    std::cout<<"FILE BEING CREATED: "<<dest_path<<std::endl;
     int src_fd = open(src_path, O_RDONLY);
     if (src_fd == -1) {
         std::cerr << "Failed to open source file: " << src_path << std::endl;
         return;
     }
     // Open the destination file for writing
-    int dest_fd = open(dest_path, O_WRONLY | O_CREAT | O_TRUNC, 0777);
+
+    int dest_fd = open(dest_path, O_RDWR | O_CREAT | O_TRUNC, 0777);
     if (dest_fd == -1) {
         std::cerr << "Failed to open destination file: " << dest_path << std::endl;
         close(src_fd); // Close the source file descriptor before returning
@@ -192,12 +219,12 @@ void copy_dir_worker(const char* src_dir, const char* dest_dir) {
         }
 
         if (S_ISDIR(st.st_mode)) {
-            if (threads.size() < numThreads){
-                std::thread t(copy_dir_worker, src_path.c_str(), dest_path.c_str());
-                threads.push_back(std::move(t));
-            } else{
+            // if (threads.size() < numThreads){
+            //     std::thread t(copy_dir_worker, src_path.c_str(), dest_path.c_str());
+            //     threads.push_back(std::move(t));
+            // } else{
                 copy_dir_worker(src_path.c_str(), dest_path.c_str());
-            }
+            // }
             //t.join();
         } else if (S_ISREG(st.st_mode)) {
             // Do nothing
@@ -243,14 +270,14 @@ void copy_dir_worker(const char* src_dir, const char* dest_dir) {
     }
 
     closedir(dir);
-    for (std::thread & th : threads){
-    // If thread Object is Joinable then Join that thread.
-    if (th.joinable())
-        th.join();
-}
+//     for (std::thread & th : threads){
+//     // If thread Object is Joinable then Join that thread.
+//     if (th.joinable())
+//         th.join();
+// }
 }
 void copy_dir(const char* src_dir, const char* dest_dir) {
-    std::cout << "Copying directory " << src_dir << " to " << dest_dir << "..." << std::endl;
+    // std::cout << "Copying directory " << src_dir << " to " << dest_dir << "..." << std::endl;
 
     //sem_t sem;
     //sem_init(&sem, 0, 5);
