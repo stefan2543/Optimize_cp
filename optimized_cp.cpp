@@ -154,7 +154,7 @@ void copy_file(const char* src_path, const char* dest_path) {
     close(src_fd);
     close(dest_fd);
 }
-void copy_dir_worker(const char* src_dir, const char* dest_dir, sem_t& sem) {
+void copy_dir_worker(const char* src_dir, const char* dest_dir) {
     std::cout << "Copying directory " << src_dir << " to " << dest_dir << "..." << std::endl;
 
     DIR* dir = opendir(src_dir);
@@ -163,14 +163,20 @@ void copy_dir_worker(const char* src_dir, const char* dest_dir, sem_t& sem) {
         return;
     }
 
-    if (mkdir(dest_dir, S_IRWXU | S_IRWXG | S_IRWXO) != 0 && errno != EEXIST) {
-        perror((std::string("Failed to create destination directory: ") + dest_dir).c_str());
-        closedir(dir);
-        return;
+    if (mkdir(dest_dir, S_IRWXU | S_IRWXG | S_IRWXO) != 0) {
+        if (errno != EEXIST){
+            perror((std::string("Failed to create destination directory: ") + dest_dir).c_str());
+            closedir(dir);
+            return;
+        } else {
+            std::cout << "Destination directory exits" << std::endl;
+        }
     }
 
     // Create all subdirectories first
     struct dirent* entry;
+    unsigned int numThreads = std::thread::hardware_concurrency();
+    std::vector<std::thread> threads;
     while ((entry = readdir(dir)) != NULL) {
         if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
             continue;
@@ -186,7 +192,13 @@ void copy_dir_worker(const char* src_dir, const char* dest_dir, sem_t& sem) {
         }
 
         if (S_ISDIR(st.st_mode)) {
-            copy_dir_worker(src_path.c_str(), dest_path.c_str(), sem);
+            if (threads.size() < numThreads){
+                std::thread t(copy_dir_worker, src_path.c_str(), dest_path.c_str());
+                threads.push_back(std::move(t));
+            } else{
+                copy_dir_worker(src_path.c_str(), dest_path.c_str());
+            }
+            //t.join();
         } else if (S_ISREG(st.st_mode)) {
             // Do nothing
         } else {
@@ -218,32 +230,38 @@ void copy_dir_worker(const char* src_dir, const char* dest_dir, sem_t& sem) {
             std::cout << "Copying file " << src_path << " to " << dest_path << "..." << std::endl;
 
             // Acquire semaphore before copying the file
-            sem_wait(&sem);
+            //sem_wait(&sem);
 
             // Copy the file in the current thread
             copy_file(src_path.c_str(), dest_path.c_str());
 
             // Release semaphore after copying the file
-            sem_post(&sem);
+            //sem_post(&sem);
         } else {
             std::cerr << "Warning: Skipping unsupported file type: " << src_path << std::endl;
         }
     }
 
     closedir(dir);
+    for (std::thread & th : threads){
+    // If thread Object is Joinable then Join that thread.
+    if (th.joinable())
+        th.join();
+}
 }
 void copy_dir(const char* src_dir, const char* dest_dir) {
     std::cout << "Copying directory " << src_dir << " to " << dest_dir << "..." << std::endl;
 
-    sem_t sem;
-    sem_init(&sem, 0, 5);
+    //sem_t sem;
+    //sem_init(&sem, 0, 5);
 
-    std::thread t(copy_dir_worker, src_dir, dest_dir, std::ref(sem));
-    t.join();
+    //std::thread t(copy_dir_worker, src_dir, dest_dir, std::ref(sem));
+    //t.join();
+    copy_dir_worker(src_dir, dest_dir);
 
     std::cout << "Finished copying directory " << src_dir << " to " << dest_dir << "." << std::endl;
 
-    sem_destroy(&sem);
+    //sem_destroy(&sem);
 }
 int main(int argc, char** argv) {
     if (argc < 3) {
@@ -257,10 +275,10 @@ int main(int argc, char** argv) {
         return 1;
     }
     // std::cout<<"1"<<std::endl;
-    if (S_ISREG(src_stat.st_mode)) {
+    //if (S_ISREG(src_stat.st_mode)) {
       // std::cout<<"2"<<std::endl;
-        copy_file(SOURCE_DIR, DESTINATION_DIR);
-    } else if (S_ISDIR(src_stat.st_mode)) {
+        //copy_file(SOURCE_DIR, DESTINATION_DIR);
+    if (S_ISDIR(src_stat.st_mode)) {
       // std::cout<<"3"<<std::endl;
         copy_dir(SOURCE_DIR, DESTINATION_DIR);
     } else {
