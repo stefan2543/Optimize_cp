@@ -100,7 +100,7 @@ void sync_copy(off_t file_size, int src_fd, int dest_fd) {
         std::cerr << "Failed to memory-map source file (FD: " << src_fd << ", size: " << file_size << "): " << strerror(errno) << std::endl;
         return;
     }
-    std::cout << "SRC MMAP FINE" << std::endl;
+    //std::cout << "SRC MMAP FINE" << std::endl;
 
     // Set the destination file size to match the source file size
     if (ftruncate(dest_fd, file_size) == -1) {
@@ -117,7 +117,7 @@ void sync_copy(off_t file_size, int src_fd, int dest_fd) {
         munmap(src_map, file_size);
         return;
     }
-    std::cout << "DST MMAP FINE" << std::endl;
+    //std::cout << "DST MMAP FINE" << std::endl;
 
     // Copy data between the memory-mapped files
 
@@ -127,13 +127,13 @@ void sync_copy(off_t file_size, int src_fd, int dest_fd) {
 
     // Copy the data from src to dst using the temporary buffer
     std::memcpy(temp_buffer, src_map, file_size);
-    std::cout << "FIRST MEM COPY" << std::endl;
+    //std::cout << "FIRST MEM COPY" << std::endl;
     std::memcpy(dest_map, temp_buffer, file_size);
-    std::cout << "SECOND MEM COPY" << std::endl;
+    //std::cout << "SECOND MEM COPY" << std::endl;
 
     // Free the temporary buffer
     std::free(temp_buffer);
-    std::cout << "COPY MMAP FINE" << std::endl;
+    //std::cout << "COPY MMAP FINE" << std::endl;
 
     // Clean up resources
     munmap(src_map, file_size);
@@ -217,14 +217,18 @@ void copy_dir_worker(const char* src_dir, const char* dest_dir) {
             perror((std::string("Failed to stat: ") + src_path).c_str());
             continue;
         }
-
+        //std::cout << "entry: " << src_path << " in thread" << std::this_thread::get_id() << "..." << std::endl;
+        //std::cout << "mode: " << st.st_mode << " to " << S_ISDIR(st.st_mode) << "..." << std::endl;
         if (S_ISDIR(st.st_mode)) {
-            // if (threads.size() < numThreads){
-            //     std::thread t(copy_dir_worker, src_path.c_str(), dest_path.c_str());
-            //     threads.push_back(std::move(t));
-            // } else{
+            if (threads.size() < numThreads){
+                std::string* src_path_copy = new std::string(src_path);
+                std::string* dest_path_copy = new std::string(dest_path);
+                //std::cout << "dest: " << dest_path_copy << " in thread" << std::this_thread::get_id() << "..." << std::endl;
+                std::thread t(copy_dir_worker, src_path_copy->c_str(), dest_path_copy->c_str());
+                threads.push_back(std::move(t));
+            } else{
                 copy_dir_worker(src_path.c_str(), dest_path.c_str());
-            // }
+            }
             //t.join();
         } else if (S_ISREG(st.st_mode)) {
             // Do nothing
@@ -242,39 +246,43 @@ void copy_dir_worker(const char* src_dir, const char* dest_dir) {
             continue;
         }
 
-        std::string src_path = std::string(src_dir) + "/" + entry->d_name;
-        std::string dest_path = std::string(dest_dir) + "/" + entry->d_name;
+        std::string src_path_f = std::string(src_dir) + "/" + entry->d_name;
+        std::string dest_path_f = std::string(dest_dir) + "/" + entry->d_name;
 
+        
         struct stat st;
-        if (stat(src_path.c_str(), &st) != 0) {
-            perror((std::string("Failed to stat: ") + src_path).c_str());
+        if (stat(src_path_f.c_str(), &st) != 0) {
+            perror((std::string("Failed to stat: ") + src_path_f).c_str());
             continue;
         }
+
+        //std::cout << "entry: " << src_path_f << " in thread" << std::this_thread::get_id() << "..." << std::endl;
+        //std::cout << "mode: " << st.st_mode << " to " << S_ISREG(st.st_mode) << "..." << std::endl;
 
         if (S_ISDIR(st.st_mode)) {
             // Do nothing
         } else if (S_ISREG(st.st_mode)) {
-            std::cout << "Copying file " << src_path << " to " << dest_path << "..." << std::endl;
+            std::cout << "Copying file " << src_path_f << " to " << dest_path_f << "..." << std::endl;
 
             // Acquire semaphore before copying the file
             //sem_wait(&sem);
 
             // Copy the file in the current thread
-            copy_file(src_path.c_str(), dest_path.c_str());
+            copy_file(src_path_f.c_str(), dest_path_f.c_str());
 
             // Release semaphore after copying the file
             //sem_post(&sem);
         } else {
-            std::cerr << "Warning: Skipping unsupported file type: " << src_path << std::endl;
+            std::cerr << "Warning: Skipping unsupported file type: " << src_path_f << std::endl;
         }
     }
 
     closedir(dir);
-//     for (std::thread & th : threads){
-//     // If thread Object is Joinable then Join that thread.
-//     if (th.joinable())
-//         th.join();
-// }
+    for (std::thread & th : threads){
+    // If thread Object is Joinable then Join that thread.
+    if (th.joinable())
+        th.join();
+    }
 }
 void copy_dir(const char* src_dir, const char* dest_dir) {
     // std::cout << "Copying directory " << src_dir << " to " << dest_dir << "..." << std::endl;
